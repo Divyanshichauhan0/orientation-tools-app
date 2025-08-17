@@ -313,112 +313,103 @@
       observer.observe(panels[Mode.Weather], {attributes:true, attributeFilter:['class']});
     })();
 
-    // --- Orientation detection (Android‑robust) ---
-    (function(){
-      const diag = document.getElementById('diag');
-      if (diagnostics) diag.style.display='block';
-      const state = { scrAngle:null, winOrient:null, mqPortrait:null, dev:null };
-      let lastMode = null, raf=0;
+  // --- Orientation detection with sensor inference for 180° ---
+(function(){
+  const diag = document.getElementById('diag');
+  if (diagnostics) diag.style.display='block';
 
-      function normalizeAngle(a){
-        // Normalize to [0,360)
-        return ((a % 360) + 360) % 360;
+  const state = { scrAngle:null, winOrient:null, mqPortrait:null, dev:null };
+  let lastMode = null, raf=0;
+
+  function normalizeAngle(a){
+    return ((a % 360) + 360) % 360;
+  }
+  function computeAngle(s){
+    // Priority: Screen Orientation API -> window.orientation -> sensors -> matchMedia
+    if (typeof s.scrAngle === 'number') return normalizeAngle(s.scrAngle);
+    if (typeof s.winOrient === 'number') return normalizeAngle(s.winOrient);
+    if (s.dev){
+      const {beta, gamma} = s.dev;
+      // Landscape detection
+      if (Math.abs(beta) < 25 && Math.abs(gamma) > 30) return gamma > 0 ? 90 : 270;
+      // Portrait upright vs upside‑down
+      if (beta > 40) return 0;
+      if (beta < -40) return 180; // ← sensor‑inferred upside‑down
+    }
+    return s.mqPortrait ? 0 : 90;
+  }
+  function angleToMode(angle){
+    // 0: Alarm, 90: Stopwatch, 180: Timer, 270: Weather
+    if (angle >= 315 || angle < 45) return Mode.Alarm;
+    if (angle >= 45 && angle < 135) return Mode.Stopwatch;
+    if (angle >= 135 && angle < 225) return Mode.Timer;
+    return Mode.Weather;
+  }
+  function update(){
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(()=>{
+      const angle = computeAngle(state);
+      const mode = angleToMode(angle);
+      if (mode !== lastMode){
+        lastMode = mode;
+        setMode(mode);
       }
-      function computeAngle(s){
-        // Priority: Screen Orientation API angle -> window.orientation -> sensors -> media query
-        if (typeof s.scrAngle === 'number') return normalizeAngle(s.scrAngle);
-        if (typeof s.winOrient === 'number') {
-          // window.orientation can be -90 on some devices
-          const wo = s.winOrient;
-          return normalizeAngle(wo);
-        }
-        if (s.dev){
-          const {beta, gamma} = s.dev; // beta: front-back tilt, gamma: left-right
-          // Heuristics: wide thresholds to avoid jitter
-          if (Math.abs(beta) < 25 && Math.abs(gamma) > 30) return gamma > 0 ? 90 : 270;
-          if (beta > 40) return 0;
-          if (beta < -40) return 180;
-        }
-        return s.mqPortrait ? 0 : 90;
-      }
-      function angleToMode(angle){
-        // 0: Alarm, 90: Stopwatch, 180: Timer, 270: Weather
-        if (angle >= 315 || angle < 45) return Mode.Alarm;
-        if (angle >= 45 && angle < 135) return Mode.Stopwatch;
-        if (angle >= 135 && angle < 225) return Mode.Timer;
-        return Mode.Weather; // 225-315
-      }
-      function update(){
-        cancelAnimationFrame(raf);
-        raf = requestAnimationFrame(()=>{
-          const angle = computeAngle(state);
-          const mode = angleToMode(angle);
-          if (mode !== lastMode){
-            lastMode = mode;
-            setMode(mode);
-          }
-          if (diagnostics){
-            diag.innerHTML =
+      if (diagnostics){
+        diag.innerHTML =
 `Screen.angle: ${state.scrAngle ?? 'n/a'}
 window.orientation: ${state.winOrient ?? 'n/a'}
 matchMedia(portrait): ${state.mqPortrait}
 DeviceOrientation: ${state.dev ? `β=${state.dev.beta?.toFixed(0)} γ=${state.dev.gamma?.toFixed(0)}` : 'no event'}
 Computed angle≈${angle} → ${mode}`;
-          }
+      }
+    });
+  }
+
+  function attach(){
+    try {
+      const so = screen.orientation;
+      if (so && typeof so.addEventListener === 'function'){
+        state.scrAngle = typeof so.angle === 'number' ? normalizeAngle(so.angle) : null;
+        so.addEventListener('change', ()=>{
+          state.scrAngle = typeof so.angle === 'number' ? normalizeAngle(so.angle) : null;
+          update();
         });
       }
+    } catch {}
 
-      function attach(){
-        // Screen Orientation API (Android Chrome supports this)
-        try {
-          const so = screen.orientation;
-          if (so && typeof so.addEventListener === 'function'){
-            state.scrAngle = typeof so.angle === 'number' ? normalizeAngle(so.angle) : null;
-            so.addEventListener('change', ()=>{
-              state.scrAngle = typeof so.angle === 'number' ? normalizeAngle(so.angle) : null;
-              update();
-            });
-          }
-        } catch {}
+    if ('orientation' in window){
+      state.winOrient = Number(window.orientation);
+      window.addEventListener('orientationchange', ()=>{
+        state.winOrient = Number(window.orientation);
+        update();
+      }, {passive:true});
+    }
 
-        // Legacy window.orientation (some browsers still fire this)
-        if ('orientation' in window){
-          state.winOrient = Number(window.orientation);
-          window.addEventListener('orientationchange', ()=>{
-            state.winOrient = Number(window.orientation);
-            update();
-          }, {passive:true});
-        }
+    const mq = window.matchMedia('(orientation: portrait)');
+    state.mqPortrait = mq.matches;
+    mq.addEventListener?.('change', e => { state.mqPortrait = e.matches; update(); });
 
-        // matchMedia baseline
-        const mq = window.matchMedia('(orientation: portrait)');
-        state.mqPortrait = mq.matches;
-        mq.addEventListener?.('change', e => { state.mqPortrait = e.matches; update(); });
+    function onDOF(e){
+      state.dev = {
+        alpha: (typeof e.alpha === 'number') ? e.alpha : null,
+        beta: (typeof e.beta === 'number') ? e.beta : null,
+        gamma: (typeof e.gamma === 'number') ? e.gamma : null,
+        absolute: !!e.absolute
+      };
+      update();
+    }
+    window.removeEventListener('deviceorientation', onDOF);
+    try {
+      window.addEventListener('deviceorientation', onDOF, {passive:true});
+    } catch {}
 
-        // DeviceOrientation (Android usually doesn't need permission)
-        function onDOF(e){
-          state.dev = {
-            alpha: (typeof e.alpha === 'number') ? e.alpha : null,
-            beta: (typeof e.beta === 'number') ? e.beta : null,
-            gamma: (typeof e.gamma === 'number') ? e.gamma : null,
-            absolute: !!e.absolute
-          };
-          update();
-        }
-        // Clean first to avoid dups on hot reload
-        window.removeEventListener('deviceorientation', onDOF);
-        try {
-          // On Android Chrome, requestPermission is undefined; just attach
-          window.addEventListener('deviceorientation', onDOF, {passive:true});
-        } catch { /* ignore */ }
+    update();
+  }
 
-        update(); // initial
-      }
+  attach();
+  setMode(window.matchMedia('(orientation: portrait)').matches ? Mode.Alarm : Mode.Stopwatch);
+})();
 
-      attach();
-      // Also set an initial heuristic based on matchMedia immediately
-      setMode(window.matchMedia('(orientation: portrait)').matches ? Mode.Alarm : Mode.Stopwatch);
-    })();
 
     // --- Enable button (resume audio and attach motion if needed) ---
     (function(){
