@@ -1,0 +1,778 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, viewport-fit=cover"
+  />
+  <title>Orientation Tools: Alarm • Timer • Stopwatch • Weather</title>
+  <meta name="theme-color" content="#0f172a" />
+  <style>
+    :root {
+      --bg: #0b1220;       /* slate-950-ish */
+      --panel: #111827;    /* gray-900 */
+      --muted: #94a3b8;    /* slate-400 */
+      --text: #e5e7eb;     /* gray-200 */
+      --accent: #22c55e;   /* green-500 */
+      --accent-2: #60a5fa; /* blue-400 */
+      --danger: #ef4444;   /* red-500 */
+      --warning: #f59e0b;  /* amber-500 */
+      --ring: rgba(96,165,250,.4);
+      --radius: 16px;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font: 16px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      color: var(--text);
+      background: radial-gradient(1200px 800px at 50% -10%, #0d1b2a 0%, var(--bg) 50%, #070b14 100%);
+      -webkit-tap-highlight-color: transparent;
+    }
+    .app {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 12px;
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 12px; border-radius: var(--radius);
+      background: rgba(17,24,39,.6); backdrop-filter: blur(8px);
+      border: 1px solid rgba(148,163,184,.2);
+    }
+    header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing:.2px; }
+    header .mode {
+      display: inline-flex; gap: 8px; align-items: center;
+      padding: 6px 10px; border-radius: 999px; background: rgba(96,165,250,.12);
+      border: 1px solid rgba(96,165,250,.3); color: #cfe0ff; font-weight: 600;
+    }
+    header .lock {
+      display: inline-flex; gap: 6px; align-items: center;
+      padding: 6px 10px; border-radius: 999px; background: rgba(34,197,94,.12);
+      border: 1px solid rgba(34,197,94,.3); color: #d1f7e2; font-weight: 600; cursor: pointer;
+      user-select: none;
+    }
+    header .lock[aria-pressed="true"] {
+      background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.35); color: #ffc9c9;
+    }
+
+    main {
+      position: relative; overflow: hidden;
+      border-radius: calc(var(--radius) + 2px);
+      border: 1px solid rgba(148,163,184,.18);
+      background: linear-gradient(180deg, rgba(17,24,39,.7), rgba(17,24,39,.5));
+      min-height: 60vh;
+    }
+    .panel {
+      position: absolute; inset: 0; padding: 16px;
+      opacity: 0; transform: translateY(6px) scale(.995);
+      transition: opacity .22s ease, transform .22s ease;
+      pointer-events: none;
+    }
+    .panel.active {
+      opacity: 1; transform: translateY(0) scale(1);
+      pointer-events: auto;
+    }
+
+    .clock {
+      margin: 8px 0 20px;
+      font-variant-numeric: tabular-nums;
+      font-weight: 700; letter-spacing: .6px; text-align: center;
+    }
+    .clock .big { font-size: clamp(42px, 12vw, 72px); }
+    .clock .sub { font-size: clamp(14px, 4vw, 16px); color: var(--muted); margin-top: 6px; }
+
+    .row { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
+    .col { flex: 1; min-width: 120px; }
+
+    .btn {
+      display: inline-flex; justify-content:center; align-items:center;
+      width: 100%; padding: 14px 16px; border-radius: 12px;
+      background: #0f172a; border: 1px solid rgba(148,163,184,.25);
+      color: var(--text); font-weight: 700; letter-spacing:.3px;
+      box-shadow: 0 6px 20px rgba(2,6,23,.3) inset;
+      cursor: pointer; user-select: none;
+    }
+    .btn:active { transform: translateY(1px); }
+    .btn.primary { background: linear-gradient(180deg, #0ea5e9, #0284c7); border: none; color: white; }
+    .btn.success { background: linear-gradient(180deg, #22c55e, #16a34a); border: none; color: white; }
+    .btn.warn { background: linear-gradient(180deg, #f59e0b, #d97706); border: none; color: black; }
+    .btn.danger { background: linear-gradient(180deg, #ef4444, #dc2626); border: none; color: white; }
+
+    input, select {
+      width: 100%; padding: 14px 12px; border-radius: 12px;
+      background: #0b1220; border: 1px solid rgba(148,163,184,.28);
+      color: var(--text); outline: none;
+    }
+    label { display:block; margin-bottom: 6px; color: var(--muted); font-size: 14px; }
+
+    .list {
+      max-height: 200px; overflow-y: auto; padding: 6px;
+      border-radius: 12px; border: 1px dashed rgba(148,163,184,.3);
+    }
+    .pill {
+      display:inline-flex; align-items:center; gap:8px;
+      padding:6px 10px; margin: 4px 6px 0 0; border-radius:999px;
+      background: rgba(148,163,184,.12); border:1px solid rgba(148,163,184,.28);
+      font-size: 12px; color:#cbd5e1;
+    }
+    footer {
+      color: var(--muted); font-size: 12px; text-align: center; padding: 6px;
+    }
+
+    .toast {
+      position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom));
+      transform: translateX(-50%); background: rgba(15,23,42,.9); color: #e5e7eb;
+      border: 1px solid rgba(148,163,184,.35); padding: 10px 12px; border-radius: 10px;
+      font-size: 14px; box-shadow: 0 10px 30px rgba(2,6,23,.35); z-index: 50; display: none;
+    }
+    .toast.show { display: block; }
+
+    .splash {
+      position: fixed; inset: 0; z-index: 60; display: grid; place-items: center;
+      background: radial-gradient(1000px 600px at 50% -10%, #0d1b2a 0%, var(--bg) 60%, #070b14 100%);
+      padding: 24px;
+    }
+    .splash-card {
+      max-width: 520px; width: 100%;
+      background: rgba(17,24,39,.7); backdrop-filter: blur(8px);
+      border: 1px solid rgba(148,163,184,.25);
+      border-radius: 18px; padding: 20px;
+      text-align: center;
+    }
+    .splash h2 { margin: 10px 0 6px; }
+    .splash p { color: var(--muted); margin: 0 0 16px; }
+    .hint { font-size: 12px; color: var(--muted); margin-top: 8px; }
+
+    /* Make controls thumb-friendly on mobile */
+    @media (hover: hover) and (pointer: fine) {
+      .btn { transition: transform .15s ease, filter .15s ease; }
+      .btn:hover { filter: brightness(1.07); }
+    }
+  </style>
+</head>
+<body>
+  <div class="app" id="app" aria-live="polite">
+    <header>
+      <h1>Orientation Tools</h1>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <div class="mode" id="modeBadge">Detecting…</div>
+        <button class="lock" id="lockBtn" aria-pressed="false" title="Lock mode to avoid accidental flips">🔓 Lock</button>
+      </div>
+    </header>
+
+    <main>
+      <!-- Alarm: Portrait upright -->
+      <section class="panel" id="panel-alarm" aria-labelledby="modeBadge">
+        <div class="clock">
+          <div class="big" id="alarmNow">--:--:--</div>
+          <div class="sub">Current time</div>
+        </div>
+
+        <div class="row">
+          <div class="col">
+            <label for="alarmTime">Set alarm time</label>
+            <input type="time" id="alarmTime" step="60" />
+          </div>
+          <div class="col" style="align-self:end;">
+            <button class="btn success" id="setAlarmBtn">Set Alarm</button>
+          </div>
+        </div>
+
+        <div id="alarmsList" class="list" aria-label="Scheduled alarms"></div>
+
+        <div class="row" style="margin-top:16px;">
+          <button class="btn warn" id="snoozeBtn" disabled>😴 Snooze 5 min</button>
+          <button class="btn danger" id="stopAlarmBtn" disabled>🛑 Stop</button>
+        </div>
+        <div class="hint">Tip: Alarms persist while you rotate. Keep the tab active for reliable ringing.</div>
+      </section>
+
+      <!-- Timer: Portrait upside down -->
+      <section class="panel" id="panel-timer">
+        <div class="clock">
+          <div class="big" id="timerDisplay">00:00</div>
+          <div class="sub">Timer</div>
+        </div>
+
+        <div class="row">
+          <button class="btn" data-preset="60">1m</button>
+          <button class="btn" data-preset="300">5m</button>
+          <button class="btn" data-preset="600">10m</button>
+          <button class="btn" data-preset="1500">25m</button>
+        </div>
+
+        <div class="row">
+          <div class="col">
+            <label for="timerMinutes">Custom minutes</label>
+            <input type="number" id="timerMinutes" min="0" step="1" placeholder="e.g., 7" />
+          </div>
+          <div class="col" style="align-self:end;">
+            <button class="btn primary" id="startTimerBtn">Start</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <button class="btn success" id="pauseTimerBtn" disabled>⏸️ Pause</button>
+          <button class="btn danger" id="resetTimerBtn" disabled>🔄 Reset</button>
+        </div>
+      </section>
+
+      <!-- Stopwatch: Landscape right (90°) -->
+      <section class="panel" id="panel-stopwatch">
+        <div class="clock">
+          <div class="big" id="swDisplay">00:00.000</div>
+          <div class="sub">Stopwatch</div>
+        </div>
+
+        <div class="row">
+          <button class="btn success" id="swStartStopBtn">▶️ Start</button>
+          <button class="btn warn" id="swLapBtn" disabled>📍 Lap</button>
+          <button class="btn danger" id="swResetBtn" disabled>🔄 Reset</button>
+        </div>
+
+        <div id="laps" class="list" aria-label="Laps"></div>
+      </section>
+
+      <!-- Weather: Landscape left (270° / -90°) -->
+      <section class="panel" id="panel-weather">
+        <div class="clock">
+          <div class="big" id="weatherMain">— °C</div>
+          <div class="sub" id="weatherSub">Weather of the day</div>
+        </div>
+
+        <div class="row">
+          <button class="btn primary" id="refreshWeatherBtn">🔄 Refresh</button>
+        </div>
+
+        <div class="row">
+          <div class="col">
+            <label for="cityInput">City (fallback if location denied)</label>
+            <input id="cityInput" placeholder="e.g., Kanth" />
+          </div>
+          <div class="col" style="align-self:end;">
+            <button class="btn" id="useCityBtn">Use City</button>
+          </div>
+        </div>
+
+        <div class="hint">Location never leaves your device; weather is fetched from Open‑Meteo free API.</div>
+      </section>
+    </main>
+
+    <footer>
+      Rotate your phone to switch tools. Portrait ↑ Alarm • Portrait ↓ Timer • Landscape → Stopwatch • Landscape ← Weather
+    </footer>
+  </div>
+
+  <!-- Splash for motion/audio permissions -->
+  <div class="splash" id="splash">
+    <div class="splash-card">
+      <div style="font-size:40px;">📱🔔</div>
+      <h2>Enable motion & sound</h2>
+      <p>Tap once to allow orientation detection on iOS and enable alarm audio.</p>
+      <div class="row">
+        <button class="btn success" id="enableBtn">Enable motion & sound</button>
+      </div>
+      <div class="hint">Works best over HTTPS. You can change device orientation anytime.</div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    // ---------- Utilities ----------
+    const $ = (sel, root = document) => root.querySelector(sel);
+    const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+    const toast = (msg, ms = 1800) => {
+      const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), ms);
+    };
+    const pad2 = (n) => n.toString().padStart(2, '0');
+    const fmtClock = (d = new Date()) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+    const fmtTimer = (s) => {
+      s = Math.max(0, Math.floor(s));
+      const m = Math.floor(s / 60), r = s % 60;
+      return `${pad2(m)}:${pad2(r)}`;
+    };
+    const fmtMs = (ms) => {
+      const m = Math.floor(ms / 60000);
+      const s = Math.floor((ms % 60000) / 1000);
+      const mm = Math.floor(ms % 1000);
+      return `${pad2(m)}:${pad2(s)}.${mm.toString().padStart(3,'0')}`;
+    };
+    const nowPerf = () => performance.now();
+    const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+    // ---------- Audio ----------
+    let audioCtx, gainNode;
+    function ensureAudio() {
+      if (audioCtx) return audioCtx;
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      gainNode = audioCtx.createGain(); gainNode.gain.value = 0.05; // default low
+      gainNode.connect(audioCtx.destination);
+      return audioCtx;
+    }
+    function beep(freq = 880, dur = 0.25) {
+      if (!audioCtx) return;
+      const o = audioCtx.createOscillator();
+      o.type = 'sine'; o.frequency.value = freq;
+      o.connect(gainNode);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    }
+    function startAlarmSound() {
+      let active = true;
+      const loop = () => {
+        if (!active) return;
+        beep(880, 0.2);
+        setTimeout(() => beep(660, 0.2), 200);
+        if (navigator.vibrate) navigator.vibrate([120, 120, 120]);
+        setTimeout(loop, 700);
+      };
+      loop();
+      return () => { active = false; };
+    }
+
+    // ---------- Orientation detection ----------
+    const Mode = {
+      Alarm: 'portrait-primary',        // 0°
+      Stopwatch: 'landscape-primary',   // 90°
+      Timer: 'portrait-secondary',      // 180°
+      Weather: 'landscape-secondary'    // 270° / -90°
+    };
+    const modeToLabel = {
+      [Mode.Alarm]: 'Portrait ↑ • Alarm ⏰',
+      [Mode.Timer]: 'Portrait ↓ • Timer ⏳',
+      [Mode.Stopwatch]: 'Landscape → • Stopwatch ⏱️',
+      [Mode.Weather]: 'Landscape ← • Weather 🌤️'
+    };
+    const panels = {
+      [Mode.Alarm]: '#panel-alarm',
+      [Mode.Timer]: '#panel-timer',
+      [Mode.Stopwatch]: '#panel-stopwatch',
+      [Mode.Weather]: '#panel-weather'
+    };
+    let appState = {
+      mode: null,
+      locked: false
+    };
+    let debounceSwitch;
+    function setMode(next) {
+      if (appState.locked) return;
+      if (next === appState.mode) return;
+      // debounce to prevent flapping at boundaries
+      clearTimeout(debounceSwitch);
+      debounceSwitch = setTimeout(() => {
+        appState.mode = next;
+        $('#modeBadge').textContent = modeToLabel[next] || 'Detecting…';
+        for (const m of Object.values(Mode)) {
+          const el = $(panels[m]);
+          if (!el) continue;
+          el.classList.toggle('active', m === next);
+        }
+        // Panel enter hooks
+        if (next === Mode.Weather) maybeRefreshWeather();
+      }, 200);
+    }
+    function mapAngleToMode(angle) {
+      const a = ((angle % 360) + 360) % 360;
+      if (a >= 315 || a < 45) return Mode.Alarm;      // 0
+      if (a >= 45 && a < 135) return Mode.Stopwatch;  // 90
+      if (a >= 135 && a < 225) return Mode.Timer;     // 180
+      return Mode.Weather;                             // 270
+    }
+    function initOrientation() {
+      // 1) Screen Orientation API
+      if (screen.orientation && 'angle' in screen.orientation) {
+        const onChange = () => setMode(mapAngleToMode(screen.orientation.angle));
+        screen.orientation.addEventListener('change', onChange);
+        onChange();
+        return;
+      }
+      // 2) window.orientation (deprecated, still useful on iOS)
+      if ('orientation' in window) {
+        const onChange = () => setMode(mapAngleToMode(window.orientation || 0));
+        window.addEventListener('orientationchange', onChange);
+        onChange();
+        return;
+      }
+      // 3) DeviceOrientation (needs permission on iOS)
+      const handler = (e) => {
+        const { beta = 0, gamma = 0 } = e; // beta front/back, gamma left/right
+        let mode;
+        if (Math.abs(gamma) > Math.abs(beta)) {
+          mode = gamma > 0 ? Mode.Stopwatch : Mode.Weather;
+        } else {
+          mode = beta > 0 ? Mode.Alarm : Mode.Timer;
+        }
+        setMode(mode);
+      };
+      if (typeof DeviceOrientationEvent !== 'undefined' &&
+          typeof DeviceOrientationEvent.requestPermission === 'function') {
+        // Will be requested from splash button.
+        window.__devOrientHandler = handler;
+      } else {
+        window.addEventListener('deviceorientation', handler, true);
+      }
+    }
+
+    // ---------- Alarm ----------
+    let alarms = []; // { id, at, fired }
+    let stopAlarmLoop = null;
+    function loadAlarms() {
+      try { alarms = JSON.parse(localStorage.getItem('alarms') || '[]'); }
+      catch { alarms = []; }
+      renderAlarms();
+    }
+    function saveAlarms() {
+      localStorage.setItem('alarms', JSON.stringify(alarms));
+    }
+    function scheduleAlarmAt(date) {
+      const id = Math.random().toString(36).slice(2);
+      alarms.push({ id, at: date.getTime(), fired: false });
+      saveAlarms();
+      renderAlarms();
+      toast('Alarm set');
+    }
+    function renderAlarms() {
+      const list = $('#alarmsList');
+      list.innerHTML = '';
+      if (!alarms.length) { list.innerHTML = '<div class="pill">No alarms scheduled</div>'; return; }
+      alarms.sort((a,b) => a.at - b.at);
+      for (const a of alarms) {
+        const d = new Date(a.at);
+        const item = document.createElement('div');
+        item.className = 'pill';
+        item.innerHTML = `⏰ ${d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+          ${a.fired ? '<span style="opacity:.7;">(fired)</span>' : ''}`;
+        const del = document.createElement('button');
+        del.textContent = '✖';
+        del.className = 'btn danger';
+        del.style.width = 'auto'; del.style.padding = '4px 8px'; del.style.fontWeight='600'; del.style.marginLeft='8px';
+        del.onclick = () => { alarms = alarms.filter(x => x.id !== a.id); saveArmsAndRender(); };
+        item.appendChild(del);
+        list.appendChild(item);
+      }
+    }
+    function saveArmsAndRender() { saveAlarms(); renderArarmsSafe(); }
+    function renderArarmsSafe() { try { renderAlarms(); } catch {} } // avoid minor race
+
+    function checkAlarms(now) {
+      for (const a of alarms) {
+        if (!a.fired && now >= a.at) {
+          a.fired = true;
+          startRinging('Alarm');
+          saveAlarms();
+          renderArarmsSafe();
+        }
+      }
+    }
+    function startRinging(source) {
+      $('#snoozeBtn').disabled = false;
+      $('#stopAlarmBtn').disabled = false;
+      if (!stopAlarmLoop) stopAlarmLoop = startAlarmSound();
+      toast(`${source} ringing`);
+    }
+    function stopRinging() {
+      $('#snoozeBtn').disabled = true;
+      $('#stopAlarmBtn').disabled = true;
+      if (stopAlarmLoop) { stopAlarmLoop(); stopAlarmLoop = null; }
+    }
+
+    // ---------- Timer ----------
+    let timer = {
+      running: false,
+      targetTs: 0,
+      remaining: 0,  // seconds if paused
+    };
+    function startTimer(seconds) {
+      const s = clamp(seconds|0, 0, 24*3600);
+      if (s === 0) return;
+      timer.running = true;
+      timer.targetTs = performance.now() + s*1000;
+      timer.remaining = 0;
+      $('#pauseTimerBtn').disabled = false;
+      $('#resetTimerBtn').disabled = false;
+    }
+    function pauseTimer() {
+      if (!timer.running) return;
+      timer.remaining = Math.ceil((timer.targetTs - performance.now())/1000);
+      timer.running = false;
+    }
+    function resumeTimer() {
+      if (timer.running || timer.remaining<=0) return;
+      startTimer(timer.remaining);
+    }
+    function resetTimer() {
+      timer = { running:false, targetTs:0, remaining:0 };
+      $('#timerDisplay').textContent = '00:00';
+      $('#pauseTimerBtn').disabled = true;
+      $('#resetTimerBtn').disabled = true;
+    }
+
+    // ---------- Stopwatch ----------
+    let sw = {
+      running: false,
+      startPerf: 0,
+      accMs: 0,
+      laps: []
+    };
+    function swStart() {
+      if (sw.running) return;
+      sw.running = true;
+      sw.startPerf = nowPerf();
+      $('#swStartStopBtn').textContent = '⏹️ Stop';
+      $('#swLapBtn').disabled = false;
+      $('#swResetBtn').disabled = false;
+    }
+    function swStop() {
+      if (!sw.running) return;
+      sw.accMs += nowPerf() - sw.startPerf;
+      sw.running = false;
+      $('#swStartStopBtn').textContent = '▶️ Start';
+    }
+    function swReset() {
+      sw = { running:false, startPerf:0, accMs:0, laps:[] };
+      $('#swDisplay').textContent = '00:00.000';
+      $('#laps').innerHTML = '';
+      $('#swLapBtn').disabled = true;
+      $('#swResetBtn').disabled = true;
+      $('#swStartStopBtn').textContent = '▶️ Start';
+    }
+    function swLap() {
+      const t = sw.running ? sw.accMs + (nowPerf() - sw.startPerf) : sw.accMs;
+      sw.laps.unshift(t);
+      renderLaps();
+    }
+    function renderLaps() {
+      const c = $('#laps');
+      c.innerHTML = '';
+      if (!sw.laps.length) { c.innerHTML = '<div class="pill">No laps yet</div>'; return; }
+      sw.laps.forEach((t, i) => {
+        const div = document.createElement('div');
+        div.className = 'pill';
+        div.textContent = `Lap ${sw.laps.length - i}: ${fmtMs(t)}`;
+        c.appendChild(div);
+      });
+    }
+
+    // ---------- Weather ----------
+    const WX_CACHE_MS = 10 * 60 * 1000;
+    let wxCache = { ts: 0, data: null, place: null };
+    const WMO = {
+      0:'☀️ Clear', 1:'🌤️ Mainly clear', 2:'⛅ Partly cloudy', 3:'☁️ Overcast',
+      45:'🌫️ Fog', 48:'🌫️ Depositing rime fog',
+      51:'🌦️ Drizzle', 53:'🌦️ Drizzle', 55:'🌦️ Drizzle',
+      61:'🌧️ Rain', 63:'🌧️ Rain', 65:'🌧️ Rain',
+      66:'🌧️ Freezing rain', 67:'🌧️ Freezing rain',
+      71:'🌨️ Snow', 73:'🌨️ Snow', 75:'🌨️ Snow',
+      77:'❄️ Snow grains', 80:'🌦️ Rain showers', 81:'🌦️ Rain showers', 82:'🌧️ Heavy showers',
+      85:'🌨️ Snow showers', 86:'❄️ Heavy snow showers',
+      95:'⛈️ Thunderstorm', 96:'⛈️ Thunderstorm', 99:'⛈️ Thunderstorm'
+    };
+    async function geolocate(timeoutMs = 7000) {
+      return new Promise((resolve, reject) => {
+        if (!navigator.geolocation) return reject(new Error('Geolocation unavailable'));
+        const opts = { enableHighAccuracy: false, timeout: timeoutMs, maximumAge: 300000 };
+        navigator.geolocation.getCurrentPosition(
+          pos => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+          err => reject(err),
+          opts
+        );
+      });
+    }
+    async function geocodeCity(name) {
+      const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=en&format=json`;
+      const r = await fetch(url);
+      if (!r.ok) throw new Error('Geocoding failed');
+      const j = await r.json();
+      if (!j.results || !j.results.length) throw new Error('City not found');
+      const g = j.results[0];
+      return { lat: g.latitude, lon: g.longitude, place: `${g.name}${g.country ? ', ' + g.country : ''}` };
+    }
+    async function fetchWeather(lat, lon) {
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=auto`;
+      const r = await fetch(url);
+      if (!r.ok) throw new Error('Weather fetch failed');
+      const j = await r.json();
+      return {
+        tempC: Math.round(j.current.temperature_2m),
+        humidity: j.current.relative_humidity_2m,
+        windKph: Math.round((j.current.wind_speed_10m || 0) * 3.6),
+        highC: Math.round(j.daily.temperature_2m_max[0]),
+        lowC: Math.round(j.daily.temperature_2m_min[0]),
+        code: j.current.weather_code
+      };
+    }
+    function renderWeather(wx, place) {
+      $('#weatherMain').textContent = `${wx.tempC} °C • ${WMO[wx.code] || '—'}`;
+      $('#weatherSub').textContent = `${place || 'Your location'} • H:${wx.highC}°  L:${wx.lowC}°  Hum:${wx.humidity}%  Wind:${wx.windKph} km/h`;
+    }
+    async function maybeRefreshWeather(force=false) {
+      const now = Date.now();
+      if (!force && wxCache.data && (now - wxCache.ts) < WX_CACHE_MS) {
+        renderWeather(wxCache.data, wxCache.place);
+        return;
+      }
+      try {
+        const { lat, lon } = await geolocate().catch(() => ({}));
+        let coords = (lat && lon) ? { lat, lon, place: 'Current location' } : null;
+        if (!coords) throw new Error('No geolocation; enter a city below');
+        const wx = await fetchWeather(coords.lat, coords.lon);
+        wxCache = { ts: now, data: wx, place: coords.place };
+        renderWeather(wx, coords.place);
+      } catch (e) {
+        toast(e.message || 'Weather unavailable');
+      }
+    }
+
+    // ---------- App tick loop ----------
+    function tick() {
+      // Current clock
+      $('#alarmNow').textContent = fmtClock(new Date());
+
+      // Timers
+      const pn = performance.now();
+
+      // Alarm check (use Date.now for wall-clock)
+      checkAlarms(Date.now());
+
+      // Timer update
+      if (timer.running) {
+        const remain = Math.ceil((timer.targetTs - pn) / 1000);
+        $('#timerDisplay').textContent = fmtTimer(remain);
+        if (remain <= 0) {
+          timer.running = false;
+          $('#pauseTimerBtn').disabled = true;
+          startRinging('Timer');
+        }
+      } else if (timer.remaining > 0) {
+        $('#timerDisplay').textContent = fmtTimer(timer.remaining);
+      }
+
+      // Stopwatch update
+      if (sw.running) {
+        const elapsed = sw.accMs + (nowPerf() - sw.startPerf);
+        $('#swDisplay').textContent = fmtMs(elapsed);
+      }
+
+      requestAnimationFrame(tick);
+    }
+
+    // ---------- Wire up UI ----------
+    function bindUI() {
+      // Lock
+      const lockBtn = $('#lockBtn');
+      lockBtn.addEventListener('click', () => {
+        appState.locked = !appState.locked;
+        lockBtn.setAttribute('aria-pressed', String(appState.locked));
+        lockBtn.textContent = appState.locked ? '🔒 Locked' : '🔓 Lock';
+        toast(appState.locked ? 'Mode locked' : 'Mode unlocked');
+      });
+
+      // Alarm set
+      $('#setAlarmBtn').addEventListener('click', () => {
+        const t = $('#alarmTime').value; // "HH:MM"
+        if (!t) { toast('Choose a time'); return; }
+        const [hh, mm] = t.split(':').map(x => parseInt(x,10));
+        const now = new Date(); const at = new Date(now);
+        at.setHours(hh, mm, 0, 0);
+        if (at.getTime() <= now.getTime()) at.setDate(at.getDate() + 1); // tomorrow
+        scheduleAlarmAt(at);
+      });
+      $('#snoozeBtn').addEventListener('click', () => {
+        stopRinging();
+        const at = new Date(Date.now() + 5*60*1000);
+        scheduleAlarmAt(at);
+        toast('Snoozed 5 minutes');
+      });
+      $('#stopAlarmBtn').addEventListener('click', stopRinging);
+
+      // Timer presets
+      $$('#panel-timer [data-preset]').forEach(btn => {
+        btn.addEventListener('click', () => startTimer(parseInt(btn.dataset.preset,10)));
+      });
+      $('#startTimerBtn').addEventListener('click', () => {
+        const mins = parseInt($('#timerMinutes').value, 10);
+        if (!Number.isFinite(mins) || mins <= 0) { toast('Enter minutes > 0'); return; }
+        startTimer(mins * 60);
+      });
+      $('#pauseTimerBtn').addEventListener('click', (e) => {
+        if (timer.running) { pauseTimer(); e.target.textContent = '▶️ Resume'; }
+        else { resumeTimer(); e.target.textContent = '⏸️ Pause'; }
+      });
+      $('#resetTimerBtn').addEventListener('click', () => {
+        resetTimer();
+        $('#pauseTimerBtn').textContent = '⏸️ Pause';
+      });
+
+      // Stopwatch
+      $('#swStartStopBtn').addEventListener('click', () => {
+        if (sw.running) swStop(); else swStart();
+      });
+      $('#swLapBtn').addEventListener('click', swLap);
+      $('#swResetBtn').addEventListener('click', swReset);
+
+      // Weather
+      $('#refreshWeatherBtn').addEventListener('click', () => maybeRefreshWeather(true));
+      $('#useCityBtn').addEventListener('click', async () => {
+        const name = $('#cityInput').value.trim();
+        if (!name) { toast('Enter a city'); return; }
+        try {
+          const g = await geocodeCity(name);
+          const wx = await fetchWeather(g.lat, g.lon);
+          wxCache = { ts: Date.now(), data: wx, place: g.place };
+          renderWeather(wx, g.place);
+        } catch (e) {
+          toast(e.message || 'Could not fetch city weather');
+        }
+      });
+    }
+
+    // ---------- Permissions splash ----------
+    async function handleEnable() {
+      try {
+        ensureAudio();
+        if (audioCtx && audioCtx.state === 'suspended') await audioCtx.resume();
+      } catch (e) { /* ignore */ }
+
+      try {
+        if (typeof DeviceOrientationEvent !== 'undefined' &&
+            typeof DeviceOrientationEvent.requestPermission === 'function') {
+          const res = await DeviceOrientationEvent.requestPermission();
+          if (res !== 'granted') toast('Motion access denied (you can still use portrait/landscape)');
+          // Attach handler if we deferred earlier
+          if (window.__devOrientHandler) {
+            window.addEventListener('deviceorientation', window.__devOrientHandler, true);
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+      $('#splash').style.display = 'none';
+    }
+
+    // ---------- Init ----------
+    window.addEventListener('DOMContentLoaded', () => {
+      bindUI();
+      loadAlarms();
+      initOrientation();
+      requestAnimationFrame(tick);
+      $('#enableBtn').addEventListener('click', handleEnable);
+
+      // Default mode for desktops without motion: use orientation media query as a hint
+      const mq = window.matchMedia('(orientation: portrait)');
+      setMode(mq.matches ? Mode.Alarm : Mode.Stopwatch);
+      mq.addEventListener?.('change', (e) => setMode(e.matches ? Mode.Alarm : Mode.Stopwatch));
+    });
+
+    // ---------- Minor helpers to fix quick typos ----------
+    function renderArarmsSafe(){ try{ renderAlarms(); }catch{} }
+    function saveArmsAndRender(){ try{ saveAlarms(); renderAlarms(); }catch{} }
+  </script>
+</body>
+</html>
