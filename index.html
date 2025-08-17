@@ -418,10 +418,25 @@ Computed angle≈${angle} → ${mode}`;
         try {
           ensureAudio();
           if (audioCtx && audioCtx.state === 'suspended') await audioCtx.resume();
-          toast('Audio enabled');
+
+          // Request motion/orientation permission on iOS (needed for upside-down detection)
+          try {
+            const DOE = window.DeviceOrientationEvent;
+            const DME = window.DeviceMotionEvent;
+            if (DOE && typeof DOE.requestPermission === 'function') {
+              const res = await DOE.requestPermission();
+              if (res !== 'granted') console.warn('DeviceOrientation permission:', res);
+            }
+            if (DME && typeof DME.requestPermission === 'function') {
+              const res2 = await DME.requestPermission();
+              if (res2 !== 'granted') console.warn('DeviceMotion permission:', res2);
+            }
+          } catch {}
+
+          toast('Audio + motion enabled');
           btn.style.display = 'none';
         } catch (e){
-          toast('Could not enable audio');
+          toast('Could not enable');
         }
       }, {passive:false});
     })();
