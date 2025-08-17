@@ -337,88 +337,130 @@
       return () => { active = false; };
     }
 
-    // ---------- Orientation detection ----------
-    const Mode = {
-      Alarm: 'portrait-primary',        // 0°
-      Stopwatch: 'landscape-primary',   // 90°
-      Timer: 'portrait-secondary',      // 180°
-      Weather: 'landscape-secondary'    // 270° / -90°
-    };
-    const modeToLabel = {
-      [Mode.Alarm]: 'Portrait ↑ • Alarm ⏰',
-      [Mode.Timer]: 'Portrait ↓ • Timer ⏳',
-      [Mode.Stopwatch]: 'Landscape → • Stopwatch ⏱️',
-      [Mode.Weather]: 'Landscape ← • Weather 🌤️'
-    };
-    const panels = {
-      [Mode.Alarm]: '#panel-alarm',
-      [Mode.Timer]: '#panel-timer',
-      [Mode.Stopwatch]: '#panel-stopwatch',
-      [Mode.Weather]: '#panel-weather'
-    };
-    let appState = {
-      mode: null,
-      locked: false
-    };
-    let debounceSwitch;
-    function setMode(next) {
-      if (appState.locked) return;
-      if (next === appState.mode) return;
-      // debounce to prevent flapping at boundaries
-      clearTimeout(debounceSwitch);
-      debounceSwitch = setTimeout(() => {
-        appState.mode = next;
-        $('#modeBadge').textContent = modeToLabel[next] || 'Detecting…';
-        for (const m of Object.values(Mode)) {
-          const el = $(panels[m]);
-          if (!el) continue;
-          el.classList.toggle('active', m === next);
-        }
-        // Panel enter hooks
-        if (next === Mode.Weather) maybeRefreshWeather();
-      }, 200);
+   // ---------- Orientation detection (robust) ----------
+const Mode = {
+  Alarm: 'portrait-primary',        // 0°
+  Stopwatch: 'landscape-primary',   // 90°
+  Timer: 'portrait-secondary',      // 180° (or inferred)
+  Weather: 'landscape-secondary'    // 270° / -90° (or inferred)
+};
+const modeToLabel = {
+  [Mode.Alarm]: 'Portrait ↑ • Alarm ⏰',
+  [Mode.Timer]: 'Portrait ↓ • Timer ⏳',
+  [Mode.Stopwatch]: 'Landscape → • Stopwatch ⏱️',
+  [Mode.Weather]: 'Landscape ← • Weather 🌤️'
+};
+const panels = {
+  [Mode.Alarm]: '#panel-alarm',
+  [Mode.Timer]: '#panel-timer',
+  [Mode.Stopwatch]: '#panel-stopwatch',
+  [Mode.Weather]: '#panel-weather'
+};
+
+let appState = { mode: null, locked: false };
+
+// Keep latest sensor readings
+let lastBeta = 0, lastGamma = 0, haveDevOrient = false;
+
+// Hysteresis for stability
+let debounceSwitch;
+function setMode(next) {
+  if (appState.locked) return;
+  if (next === appState.mode) return;
+  clearTimeout(debounceSwitch);
+  debounceSwitch = setTimeout(() => {
+    appState.mode = next;
+    $('#modeBadge').textContent = modeToLabel[next] || 'Detecting…';
+    for (const m of Object.values(Mode)) {
+      const el = $(panels[m]); if (!el) continue;
+      el.classList.toggle('active', m === next);
     }
-    function mapAngleToMode(angle) {
-      const a = ((angle % 360) + 360) % 360;
-      if (a >= 315 || a < 45) return Mode.Alarm;      // 0
-      if (a >= 45 && a < 135) return Mode.Stopwatch;  // 90
-      if (a >= 135 && a < 225) return Mode.Timer;     // 180
-      return Mode.Weather;                             // 270
+    if (next === Mode.Weather) maybeRefreshWeather();
+  }, 160);
+}
+
+function normalizeAngle(angle) {
+  return ((angle % 360) + 360) % 360; // [-∞,∞) -> [0,360)
+}
+function baseModeFromAngle(angle) {
+  const a = normalizeAngle(angle);
+  if (a >= 315 || a < 45) return Mode.Alarm;       // 0
+  if (a >= 45 && a < 135) return Mode.Stopwatch;   // 90
+  if (a >= 135 && a < 225) return Mode.Timer;      // 180
+  return Mode.Weather;                              // 270
+}
+
+// Combine angle + sensors to infer missing states on platforms that don't fire 180/-90
+function combinedModeFrom(angleMaybe) {
+  let mode;
+  if (typeof angleMaybe === 'number') {
+    mode = baseModeFromAngle(angleMaybe);
+  } else {
+    // No angle? Fall back to sensors only
+    mode = Math.abs(lastGamma) > Math.abs(lastBeta)
+      ? (lastGamma >= 0 ? Mode.Stopwatch : Mode.Weather)
+      : (lastBeta >= 0 ? Mode.Alarm : Mode.Timer);
+  }
+
+  // If OS only reports portrait-primary, use beta to detect upside-down
+  if (mode === Mode.Alarm && haveDevOrient && lastBeta < -15) {
+    mode = Mode.Timer;
+  }
+  // If OS only reports landscape-primary, use gamma to detect other landscape
+  if (mode === Mode.Stopwatch && haveDevOrient && lastGamma < -15) {
+    mode = Mode.Weather;
+  }
+  return mode;
+}
+
+function initOrientation() {
+  // Screen Orientation API
+  if (screen.orientation && 'angle' in screen.orientation) {
+    const onChange = () => setMode(combinedModeFrom(screen.orientation.angle));
+    screen.orientation.addEventListener('change', onChange);
+    onChange();
+  } else if ('orientation' in window) {
+    // window.orientation (iOS legacy): 0, 90, -90 (never 180 on many iPhones)
+    const onChange = () => setMode(combinedModeFrom(window.orientation || 0));
+    window.addEventListener('orientationchange', onChange);
+    onChange();
+  }
+
+  // Always try to attach DeviceOrientation to enrich inference
+  const devHandler = (e) => {
+    if (typeof e.beta === 'number') lastBeta = e.beta;
+    if (typeof e.gamma === 'number') lastGamma = e.gamma;
+    haveDevOrient = true;
+    // If screen/window listeners didn't run or are ambiguous, update from sensors
+    if (!screen.orientation && !('orientation' in window)) {
+      setMode(combinedModeFrom(undefined));
+    } else {
+      // Nudge mode if angle is too coarse to differentiate states
+      setMode(combinedModeFrom(
+        screen.orientation?.angle ?? window.orientation ?? undefined
+      ));
     }
-    function initOrientation() {
-      // 1) Screen Orientation API
-      if (screen.orientation && 'angle' in screen.orientation) {
-        const onChange = () => setMode(mapAngleToMode(screen.orientation.angle));
-        screen.orientation.addEventListener('change', onChange);
-        onChange();
-        return;
-      }
-      // 2) window.orientation (deprecated, still useful on iOS)
-      if ('orientation' in window) {
-        const onChange = () => setMode(mapAngleToMode(window.orientation || 0));
-        window.addEventListener('orientationchange', onChange);
-        onChange();
-        return;
-      }
-      // 3) DeviceOrientation (needs permission on iOS)
-      const handler = (e) => {
-        const { beta = 0, gamma = 0 } = e; // beta front/back, gamma left/right
-        let mode;
-        if (Math.abs(gamma) > Math.abs(beta)) {
-          mode = gamma > 0 ? Mode.Stopwatch : Mode.Weather;
-        } else {
-          mode = beta > 0 ? Mode.Alarm : Mode.Timer;
-        }
-        setMode(mode);
-      };
-      if (typeof DeviceOrientationEvent !== 'undefined' &&
-          typeof DeviceOrientationEvent.requestPermission === 'function') {
-        // Will be requested from splash button.
-        window.__devOrientHandler = handler;
-      } else {
-        window.addEventListener('deviceorientation', handler, true);
-      }
-    }
+  };
+
+  if (typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    // iOS: request after user tap (splash button calls this)
+    window.__attachDevOrient = () =>
+      window.addEventListener('deviceorientation', devHandler, true);
+  } else {
+    // Non-iOS or older: attach immediately
+    window.addEventListener('deviceorientation', devHandler, true);
+  }
+}
+
+// Call this in your splash enable handler after permission is granted on iOS:
+function attachDeviceOrientationIfDeferred() {
+  if (window.__attachDevOrient) {
+    try { window.__attachDevOrient(); } catch {}
+    window.__attachDevOrient = null;
+  }
+}
+
 
     // ---------- Alarm ----------
     let alarms = []; // { id, at, fired }
